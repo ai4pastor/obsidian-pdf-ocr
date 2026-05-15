@@ -1,7 +1,7 @@
 {
 	"id": "pdf-ocr",
 	"name": "PDF OCR",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"minAppVersion": "0.15.0",
 	"description": "Mistral OCR로 PDF를 마크다운으로 변환합니다. (L3-N0X/obsidian-marker 기반)",
 	"author": "abadcsh",

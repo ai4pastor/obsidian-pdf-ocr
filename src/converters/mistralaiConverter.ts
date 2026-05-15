@@ -88,7 +88,7 @@ export class MistralAIConverter extends BaseConverter {
       );
 
       // Process the conversion result
-      await this.processConversionResult(
+      const ok = await this.processConversionResult(
         app,
         settings,
         conversionResult,
@@ -96,12 +96,9 @@ export class MistralAIConverter extends BaseConverter {
         file
       );
 
+      if (!ok) return false;
+
       new Notice('MistralAI OCR 변환이 완료되었습니다');
-
-      if (settings.deleteOriginal) {
-        await deleteOriginalFile(app, file);
-      }
-
       return true;
     } catch (error) {
       console.error('MistralAI conversion error:', error.message, error.stack);

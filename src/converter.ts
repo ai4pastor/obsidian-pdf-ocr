@@ -62,11 +62,11 @@ export abstract class BaseConverter implements Converter {
     data: ConversionResult,
     folderPath: string,
     originalFile: TFile
-  ) {
+  ): Promise<boolean> {
     try {
       if (!data || !data.success) {
         new Notice(`변환 실패: ${data?.error || '알 수 없는 오류'}`);
-        return;
+        return false;
       }
 
       await createConversionFolder(app, folderPath);
@@ -135,6 +135,7 @@ export abstract class BaseConverter implements Converter {
       if (settings.deleteOriginal) {
         await deleteOriginalFile(app, originalFile);
       }
+      return true;
     } catch (error) {
       console.error(
         'Failed to process conversion result:',
@@ -146,6 +147,7 @@ export abstract class BaseConverter implements Converter {
           error.message || '알 수 없는 오류'
         }`
       );
+      return false;
     }
   }
 }

@@ -23,9 +23,11 @@ export async function createConversionFolder(
   app: App,
   folderPath: string
 ): Promise<string> {
-  const folder = app.vault.getAbstractFileByPath(folderPath);
+  const cleanPath = folderPath.replace(/\/+$/, '');
+  if (!cleanPath) return folderPath; // 볼트 루트 — 별도 폴더 필요 없음
+  const folder = app.vault.getAbstractFileByPath(cleanPath);
   if (!(folder instanceof TFolder)) {
-    await app.vault.createFolder(folderPath);
+    await app.vault.createFolder(cleanPath);
   }
   return folderPath;
 }
