@@ -58,7 +58,7 @@ export const DEFAULT_SETTINGS: MarkerSettings = {
   writeMetadata: false,
   movePDFtoFolder: false,
   createAssetSubfolder: true,
-  apiEndpoint: 'selfhosted',
+  apiEndpoint: 'mistralai',
   apiKey: '',
   datalabApiKey: '',
   mistralaiApiKey: '',
@@ -87,35 +87,54 @@ export class MarkerSettingTab extends PluginSettingTab {
 
     containerEl.empty();
 
-    // API endpoint selection (global setting)
+    // Mistral 고정 (다른 엔드포인트는 비활성화)
+    if (this.plugin.settings.apiEndpoint !== 'mistralai') {
+      this.plugin.settings.apiEndpoint = 'mistralai';
+      this.plugin.saveSettings();
+    }
+
+    containerEl.createEl('h3', { text: 'MistralAI 설정' });
+
+    // MistralAI API 키 입력 + 두 개 버튼 (연결 테스트 + 키 발급 링크)
     new Setting(containerEl)
-      .setName('API 엔드포인트')
-      .setDesc('사용할 API 엔드포인트를 선택하세요')
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption('datalab', 'Datalab')
-          .addOption('selfhosted', 'Self-hosted')
-          .addOption('python-api', 'Python API')
-          .addOption('mistralai', 'MistralAI')
-          .setValue(this.plugin.settings.apiEndpoint)
+      .setName('MistralAI API 키')
+      .setDesc(
+        'MistralAI API 키를 입력하세요. 무료 발급 가능합니다.'
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder('API 키')
+          .setValue(this.plugin.settings.mistralaiApiKey || '')
           .onChange(async (value) => {
-            this.plugin.settings.apiEndpoint = value;
+            this.plugin.settings.mistralaiApiKey = value;
             await this.plugin.saveSettings();
-            this.display(); // Refresh the settings to show appropriate converter settings
+          })
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText('연결 테스트')
+          .onClick(async () => {
+            await this.plugin.testConnection(false);
+          })
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText('API 키 발급')
+          .setCta()
+          .onClick(() => {
+            window.open('https://console.mistral.ai/api-keys', '_blank');
           })
       );
 
-    // Add a heading for converter-specific settings
-    containerEl.createEl('h3', { text: '변환기 설정' });
-
-    // Render the settings for the current converter
+    // Render the rest of converter settings (API 키는 위에서 직접 처리했으므로 중복 표시 회피)
     if (this.plugin.converter) {
       renderConverterSettings(
         containerEl,
         this.app,
         this.plugin.converter,
         this.plugin.settings,
-        async () => await this.plugin.saveSettings()
+        async () => await this.plugin.saveSettings(),
+        ['mistralaiApiKey']
       );
     }
 

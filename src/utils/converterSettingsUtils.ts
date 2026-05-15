@@ -103,19 +103,21 @@ export function renderConverterSettings(
   app: App,
   converter: Converter,
   settings: MarkerSettings,
-  saveSettings: () => Promise<void>
+  saveSettings: () => Promise<void>,
+  excludeIds: string[] = []
 ): void {
-  // Get settings definitions from the converter
   const settingDefinitions = converter.getConverterSettings();
+  const exclude = new Set(excludeIds);
 
-  // Render each setting
-  settingDefinitions.forEach((definition) => {
-    createConverterSetting(
-      containerEl,
-      app,
-      definition,
-      settings,
-      saveSettings
-    );
-  });
+  settingDefinitions
+    .filter((def) => !exclude.has(def.id))
+    .forEach((definition) => {
+      createConverterSetting(
+        containerEl,
+        app,
+        definition,
+        settings,
+        saveSettings
+      );
+    });
 }
