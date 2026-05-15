@@ -1,0 +1,18 @@
+node_modules/
+main.js
+*.js.map
+.DS_Store
+.env
+.env.local
+data.json
+
+# Build
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Obsidian test vault
+test-vault/.obsidian/workspace*
