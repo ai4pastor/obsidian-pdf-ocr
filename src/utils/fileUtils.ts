@@ -1,6 +1,7 @@
 import { App, Notice, TFile, TFolder, base64ToArrayBuffer } from 'obsidian';
 import { MarkerSettings } from '../settings';
 import { MarkerOkayCancelDialog } from '../modals';
+import { convertBibleReferences } from './bibleLinks';
 
 export async function getConversionFolderPath(
   file: TFile,
@@ -147,6 +148,11 @@ export async function createMarkdownFile(
   // remove images when only text is extracted
   if (settings.extractContent === 'text') {
     markdown = markdown.replace(/!\[.*\]\(.*\)/g, '');
+  }
+
+  // 성경 구절 자동 wikilink 변환
+  if (settings.bibleLinkConvert ?? true) {
+    markdown = convertBibleReferences(markdown);
   }
 
   const existingFile = app.vault.getAbstractFileByPath(filePath);

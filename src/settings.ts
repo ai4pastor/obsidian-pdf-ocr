@@ -47,6 +47,8 @@ export interface MarkerSettings {
   deleteFileFromMistralaiAfterConversion?: boolean;
   // 변환 후 적용할 Templater 템플릿 (vault 상대 경로, 예: "Templates/WORD분류.md")
   templaterTemplate?: string;
+  // 본문에서 성경 구절을 [[책장_절]] 위키링크로 자동 변환
+  bibleLinkConvert?: boolean;
 }
 
 export const DEFAULT_SETTINGS: MarkerSettings = {
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: MarkerSettings = {
   imageMinSize: 0, // Default to 0 (no minimum size)
   deleteFileFromMistralaiAfterConversion: false,
   templaterTemplate: '',
+  bibleLinkConvert: true,
 };
 
 export class MarkerSettingTab extends PluginSettingTab {
@@ -220,6 +223,20 @@ export class MarkerSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.deleteOriginal)
           .onChange(async (value) => {
             this.plugin.settings.deleteOriginal = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('성경 구절 자동 wikilink')
+      .setDesc(
+        '본문의 성경 구절을 [[책장_절]] 형식으로 자동 변환합니다. 예: "창세기 1장 1절" → [[창1_1]] (범위는 개별 절로 분해, 절이 없는 장 인용은 패스)'
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.bibleLinkConvert ?? true)
+          .onChange(async (value) => {
+            this.plugin.settings.bibleLinkConvert = value;
             await this.plugin.saveSettings();
           })
       );
