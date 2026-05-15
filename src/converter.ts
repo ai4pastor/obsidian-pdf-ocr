@@ -89,15 +89,13 @@ export abstract class BaseConverter implements Converter {
       ) {
         let imageFolderPath = folderPath;
         if (settings.createAssetSubfolder) {
+          const subfolderPath = folderPath + originalFile.basename;
           if (
-            !(
-              app.vault.getAbstractFileByPath(folderPath + 'assets') instanceof
-              TFolder
-            )
+            !(app.vault.getAbstractFileByPath(subfolderPath) instanceof TFolder)
           ) {
-            await app.vault.createFolder(folderPath + 'assets/');
+            await app.vault.createFolder(subfolderPath);
           }
-          imageFolderPath += 'assets/';
+          imageFolderPath = subfolderPath + '/';
         }
         await createImageFiles(
           app,

@@ -131,7 +131,7 @@ export class MarkerSettingTab extends PluginSettingTab {
     // setting for whether to create an asset subfolder
     new Setting(containerEl)
       .setName('이미지 하위 폴더 생성')
-      .setDesc('추출된 이미지를 위한 하위 폴더를 만듭니다')
+      .setDesc('PDF와 같은 이름의 하위 폴더를 만들어 추출된 이미지를 모아둡니다')
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.createAssetSubfolder)

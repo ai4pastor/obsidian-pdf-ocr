@@ -83,11 +83,8 @@ export async function createImageFiles(
 
   for (const [imageName, imageBase64] of Object.entries(images)) {
     try {
-      let newImageName = imageName;
-      if (settings.createAssetSubfolder) {
-        newImageName =
-          originalFile.name.replace(/\.pdf(?=[^.]*$)/, '_') + imageName;
-      }
+      // PDF 이름 폴더 안에 들어가므로 파일명에 PDF prefix 불필요
+      const newImageName = imageName;
       const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
       // check if image already exists, if so, overwrite it
       if (
@@ -139,15 +136,12 @@ export async function createMarkdownFile(
   const filePath = folderPath + fileName;
   let file: TFile;
 
-  // change markdown image links when asset subfolder is created
+  // 이미지 하위 폴더 사용 시: 마크다운 이미지 링크를 "PDF이름/이미지파일명" 형식으로 교체
   if (settings.createAssetSubfolder) {
-    const cleanImagePath = originalFile.name
-      .replace(/\.pdf(?=[^.]*$)/, '_')
-      .replace(/\s+/g, '%20');
-
+    const folderName = originalFile.basename.replace(/\s+/g, '%20');
     markdown = markdown.replace(
       /!\[.*\]\((.*)\)/g,
-      `![$1](assets/${cleanImagePath}$1)`
+      `![$1](${folderName}/$1)`
     );
   }
   // remove images when only text is extracted
