@@ -1,9 +1,9 @@
 {
-	"id": "pdf-ocr",
-	"name": "PDF OCR",
-	"version": "0.2.1",
+	"id": "a4p-pdf-ocr",
+	"name": "A4P pdf ocr",
+	"version": "0.3.0",
 	"minAppVersion": "0.15.0",
-	"description": "Mistral OCR로 PDF를 마크다운으로 변환합니다. (L3-N0X/obsidian-marker 기반)",
+	"description": "AI4Pastor PDF OCR — Mistral OCR로 PDF를 마크다운으로 변환합니다. (L3-N0X/obsidian-marker 기반)",
 	"author": "abadcsh",
 	"authorUrl": "https://github.com/abadcsh-tech",
 	"isDesktopOnly": false
