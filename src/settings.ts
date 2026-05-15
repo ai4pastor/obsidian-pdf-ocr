@@ -1,6 +1,24 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab, Setting, TFile } from 'obsidian';
 import Marker from './main';
 import { renderConverterSettings } from './utils/converterSettingsUtils';
+
+// Templater 플러그인이 설정한 템플릿 폴더 경로 반환 (없으면 null)
+function getTemplaterFolder(app: App): string | null {
+  const templater = (app as any).plugins?.plugins?.['templater-obsidian'];
+  if (!templater) return null;
+  const folder = templater.settings?.templates_folder;
+  return folder && folder.trim() ? folder.trim() : null;
+}
+
+// 지정 폴더 안의 모든 .md 파일 경로 목록 (재귀)
+function listMarkdownFiles(app: App, folderPath: string): string[] {
+  const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+  return app.vault
+    .getFiles()
+    .filter((f: TFile) => f.extension === 'md' && f.path.startsWith(prefix))
+    .map((f: TFile) => f.path)
+    .sort();
+}
 
 export interface MarkerSettings {
   markerEndpoint: string;
@@ -27,6 +45,8 @@ export interface MarkerSettings {
   imageLimit?: number;
   imageMinSize?: number; // Minimum height and width of images to extract
   deleteFileFromMistralaiAfterConversion?: boolean;
+  // 변환 후 적용할 Templater 템플릿 (vault 상대 경로, 예: "Templates/WORD분류.md")
+  templaterTemplate?: string;
 }
 
 export const DEFAULT_SETTINGS: MarkerSettings = {
@@ -53,6 +73,7 @@ export const DEFAULT_SETTINGS: MarkerSettings = {
   imageLimit: 0,
   imageMinSize: 0, // Default to 0 (no minimum size)
   deleteFileFromMistralaiAfterConversion: false,
+  templaterTemplate: '',
 };
 
 export class MarkerSettingTab extends PluginSettingTab {
@@ -199,6 +220,34 @@ export class MarkerSettingTab extends PluginSettingTab {
         this.plugin.settings.writeMetadata && canWriteMetadata;
       writeMetadataToggle.settingEl.toggle(canWriteMetadata);
     };
+
+    // ── Templater 템플릿 자동 적용 ──
+    containerEl.createEl('h3', { text: '변환 후 템플릿 적용' });
+
+    const templaterFolder = getTemplaterFolder(this.app);
+    if (!templaterFolder) {
+      containerEl.createEl('p', {
+        text: 'Templater 플러그인이 설치/활성화돼 있지 않거나 템플릿 폴더가 설정되지 않았습니다. Templater 플러그인 설정에서 "Template folder location"을 먼저 지정하세요.',
+        attr: { style: 'color: var(--text-muted); font-size: 0.9em;' },
+      });
+    } else {
+      const templates = listMarkdownFiles(this.app, templaterFolder);
+      new Setting(containerEl)
+        .setName('변환 후 적용할 템플릿')
+        .setDesc(
+          `OCR 변환이 끝난 MD 파일에 자동 적용할 Templater 템플릿. (폴더: ${templaterFolder})`
+        )
+        .addDropdown((dropdown) => {
+          dropdown.addOption('', '사용 안 함');
+          templates.forEach((path) => dropdown.addOption(path, path));
+          dropdown
+            .setValue(this.plugin.settings.templaterTemplate || '')
+            .onChange(async (value) => {
+              this.plugin.settings.templaterTemplate = value;
+              await this.plugin.saveSettings();
+            });
+        });
+    }
 
     // Initialize settings state
     updateMovePDFSetting(this.plugin.settings.createFolder);

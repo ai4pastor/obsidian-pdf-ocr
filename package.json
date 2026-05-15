@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-pdf-ocr",
-	"version": "0.1.2",
+	"version": "0.2.0",
 	"description": "Mistral OCR로 PDF를 마크다운으로 변환 (obsidian-marker 기반)",
 	"main": "main.js",
 	"scripts": {
