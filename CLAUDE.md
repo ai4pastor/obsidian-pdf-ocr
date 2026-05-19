@@ -1,4 +1,6 @@
-# A4P pdf ocr — Claude 작업 가이드
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 프로젝트 개요
 옵시디언 플러그인. Mistral OCR로 PDF→마크다운 변환.
@@ -8,6 +10,13 @@
 - **베이스**: L3-N0X/obsidian-marker (MIT) 포크 기반
 - **사용자**: 한국어 사용 목사·전도사 (성현님 + 수강생)
 - **dev vault**: `~/obsidian_dev_vault/.obsidian/plugins/a4p-pdf-ocr/`
+
+## 명령어
+- `npm install` — 의존성 설치 (`@mistralai/mistralai` 외 obsidian/typescript dev deps)
+- `npm run dev` — watch 모드 빌드 (esbuild)
+- `npm run build` — 프로덕션 빌드 (`tsc -noEmit -skipLibCheck` + esbuild) → `main.js` 생성
+- `npm run version` — `version-bump.mjs` 실행 (manifest/versions 동기화, 보통 수동 bump 후 사용)
+- 테스트 스위트 없음 — 검증은 dev vault에서 수동 동작 확인
 
 ## 워크플로우 (모든 변경 시 엄수)
 1. 코드 수정
