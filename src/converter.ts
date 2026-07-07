@@ -10,8 +10,21 @@ export interface ConversionResult {
   error?: string;
 }
 
+// 일괄 변환 시 개별 파일 동작 제어
+export interface ConvertOptions {
+  // 덮어쓰기를 이미 일괄로 확인받았으면 true — 파일별 확인 다이얼로그 생략
+  overwriteExisting?: boolean;
+  // 변환 후 생성된 노트를 열지 여부 (일괄 변환에서는 false)
+  openAfterConversion?: boolean;
+}
+
 export interface Converter {
-  convert(app: App, settings: MarkerSettings, file: TFile): Promise<boolean>;
+  convert(
+    app: App,
+    settings: MarkerSettings,
+    file: TFile,
+    options?: ConvertOptions
+  ): Promise<boolean>;
   testConnection(settings: MarkerSettings, silent?: boolean): Promise<boolean>;
   getConverterSettings(): ConverterSettingDefinition[]; // New method
 }
@@ -30,7 +43,8 @@ export abstract class BaseConverter implements Converter {
   abstract convert(
     app: App,
     settings: MarkerSettings,
-    file: TFile
+    file: TFile,
+    options?: ConvertOptions
   ): Promise<boolean>;
 
   abstract testConnection(
@@ -61,7 +75,8 @@ export abstract class BaseConverter implements Converter {
     settings: MarkerSettings,
     data: ConversionResult,
     folderPath: string,
-    originalFile: TFile
+    originalFile: TFile,
+    options?: ConvertOptions
   ): Promise<boolean> {
     try {
       if (!data || !data.success) {
@@ -78,7 +93,8 @@ export abstract class BaseConverter implements Converter {
           settings,
           data.markdown,
           folderPath,
-          originalFile
+          originalFile,
+          options?.openAfterConversion ?? true
         );
       }
 

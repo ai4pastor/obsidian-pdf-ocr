@@ -214,10 +214,10 @@ export class MarkerSettingTab extends PluginSettingTab {
           })
       );
 
-    // setting for whether the original pdf should be deleted after conversion
+    // setting for whether the original file should be deleted after conversion
     new Setting(containerEl)
-      .setName('원본 PDF 삭제')
-      .setDesc('변환 후 원본 PDF를 삭제합니다.')
+      .setName('원본 파일 삭제')
+      .setDesc('변환 후 원본 파일(PDF·DOCX·이미지 등)을 삭제합니다.')
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.deleteOriginal)

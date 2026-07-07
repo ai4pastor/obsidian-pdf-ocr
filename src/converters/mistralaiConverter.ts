@@ -1,7 +1,7 @@
 import { App, Notice, TFile, MarkdownView } from 'obsidian';
 import { Mistral } from '@mistralai/mistralai';
 import { MarkerSettings } from '../settings';
-import { BaseConverter, ConversionResult } from '../converter';
+import { BaseConverter, ConversionResult, ConvertOptions } from '../converter';
 import { ConverterSettingDefinition } from '../utils/converterSettingsUtils';
 import { deleteOriginalFile, checkForExistingFiles } from '../utils/fileUtils';
 import { OCRPageObject } from '@mistralai/mistralai/models/components';
@@ -52,13 +52,17 @@ export class MistralAIConverter extends BaseConverter {
   async convert(
     app: App,
     settings: MarkerSettings,
-    file: TFile
+    file: TFile,
+    options?: ConvertOptions
   ): Promise<boolean> {
     const folderPath = await this.prepareConversion(settings, file);
     if (!folderPath) return false;
 
-    if (!(await checkForExistingFiles(app, folderPath, file))) {
-      return true;
+    // 일괄 변환에서 덮어쓰기를 이미 확인받았으면 파일별 다이얼로그 생략
+    if (!options?.overwriteExisting) {
+      if (!(await checkForExistingFiles(app, folderPath, file))) {
+        return true;
+      }
     }
 
     if (!settings.mistralaiApiKey) {
@@ -107,14 +111,32 @@ export class MistralAIConverter extends BaseConverter {
       const imageMinSize =
         (settings.imageMinSize ?? 0) > 0 ? settings.imageMinSize : undefined;
 
+      // 이미지 파일은 image_url, 문서(pdf/docx/pptx 등)는 document_url로 전달
+      const isImageFile = ['png', 'jpg', 'jpeg'].includes(
+        file.extension.toLowerCase()
+      );
+
+      // 오피스 문서는 이미지를 base64로만 반환 가능 —
+      // base64 미포함 요청 시 imageLimit=0을 명시하지 않으면 API가 400을 반환함
+      const isOfficeFile = ['docx', 'doc', 'pptx', 'ppt'].includes(
+        file.extension.toLowerCase()
+      );
+      const effectiveImageLimit =
+        isOfficeFile && !includeImages ? 0 : imageLimit;
+
       const ocrResponse = await client.ocr.process({
         model: 'mistral-ocr-latest',
-        document: {
-          type: 'document_url',
-          documentUrl: signedUrl.url,
-        },
+        document: isImageFile
+          ? {
+              type: 'image_url',
+              imageUrl: signedUrl.url,
+            }
+          : {
+              type: 'document_url',
+              documentUrl: signedUrl.url,
+            },
         includeImageBase64: includeImages,
-        imageLimit: imageLimit,
+        imageLimit: effectiveImageLimit,
         imageMinSize: imageMinSize,
       });
 
@@ -135,7 +157,8 @@ export class MistralAIConverter extends BaseConverter {
         settings,
         conversionResult,
         folderPath,
-        file
+        file,
+        options
       );
 
       if (!ok) return false;

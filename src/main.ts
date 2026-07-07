@@ -1,6 +1,11 @@
-import { Plugin, TFile, Menu } from 'obsidian';
+import { Plugin, TFile, TFolder, TAbstractFile, Menu, Notice } from 'obsidian';
 import { MarkerSettings, DEFAULT_SETTINGS, MarkerSettingTab } from './settings';
-import { Converter } from './converter';
+import {
+  MarkerOkayCancelDialog,
+  MarkerBatchOverwriteDialog,
+  BatchOverwriteChoice,
+} from './modals';
+import { Converter, ConvertOptions } from './converter';
 import { DatalabConverter } from './converters/datalabConverter';
 import { MarkerApiDockerConverter } from './converters/markerApiDocker';
 import { PythonAPIConverter } from './converters/markerPythonApi';
@@ -40,9 +45,13 @@ export default class Marker extends Plugin {
   }
 
   private registerFileMenuEvents() {
-    // Register "Convert to MD" menu item for single PDF files
+    // Register "Convert to MD" menu item for single files and folders
     this.registerEvent(
-      this.app.workspace.on('file-menu', (menu: Menu, file: TFile) => {
+      this.app.workspace.on('file-menu', (menu: Menu, file: TAbstractFile) => {
+        if (file instanceof TFolder) {
+          this.addFolderMenuItem(menu, file);
+          return;
+        }
         if (!(file instanceof TFile) || !this.isValidFile(file)) return;
         menu.addItem((item) => {
           item.setIcon('pdf-file');
@@ -55,32 +64,126 @@ export default class Marker extends Plugin {
       })
     );
 
-    // Register "Convert to MD" menu item for multiple PDF files
+    // Register "Convert to MD" menu item for multiple selected files
     this.registerEvent(
-      this.app.workspace.on('files-menu', (menu: Menu, files: TFile[]) => {
-        const pdfFiles = files.filter((file) => this.isValidFile(file));
-        if (pdfFiles.length === 0) return;
+      this.app.workspace.on('files-menu', (menu: Menu, files: TAbstractFile[]) => {
+        const validFiles = files.filter(
+          (file): file is TFile => file instanceof TFile && this.isValidFile(file)
+        );
+        if (validFiles.length === 0) return;
 
         menu.addItem((item) => {
           item.setIcon('files');
-          item.setTitle(pdfFiles.length + '개 파일을 MD로 변환');
+          item.setTitle(validFiles.length + '개 파일을 MD로 변환');
           item.setSection('action');
           item.onClick(async (): Promise<void> => {
-            for (const file of pdfFiles) {
-              await this.convertFile(file);
-            }
+            await this.convertFiles(validFiles);
           });
         });
       })
     );
   }
 
+  private addFolderMenuItem(menu: Menu, folder: TFolder) {
+    // 폴더 바로 아래의 변환 가능 파일만 대상 (하위 폴더 미포함)
+    const targetFiles = folder.children.filter(
+      (child): child is TFile => child instanceof TFile && this.isValidFile(child)
+    );
+    if (targetFiles.length === 0) return;
+
+    menu.addItem((item) => {
+      item.setIcon('folder-input');
+      item.setTitle(`폴더 내 ${targetFiles.length}개 파일을 MD로 변환`);
+      item.setSection('action');
+      item.onClick(() => {
+        new MarkerOkayCancelDialog(
+          this.app,
+          '폴더 일괄 변환',
+          `${targetFiles.length}개 파일을 MD로 변환합니다. Mistral API 사용량이 발생합니다. 계속할까요?`,
+          async (confirmed) => {
+            if (confirmed) await this.convertFiles(targetFiles);
+          }
+        ).open();
+      });
+    });
+  }
+
+  // 변환 결과 MD가 생성될 경로 (원본과 같은 폴더, 같은 basename)
+  private getTargetMdPath(file: TFile): string {
+    const parentPath = file.parent?.path;
+    const folderPath =
+      !parentPath || parentPath === '/' ? '' : parentPath + '/';
+    return folderPath + file.basename + '.md';
+  }
+
+  private async convertFiles(files: TFile[]) {
+    // 이미 같은 이름의 MD가 있는 파일은 다이얼로그 한 번으로 일괄 처리
+    const collisions = new Set(
+      files.filter(
+        (f) =>
+          this.app.vault.getAbstractFileByPath(this.getTargetMdPath(f)) instanceof
+          TFile
+      )
+    );
+
+    let targets = files;
+    let overwriteExisting = false;
+    let skipped = 0;
+
+    if (collisions.size > 0) {
+      const choice = await new Promise<BatchOverwriteChoice>((resolve) =>
+        new MarkerBatchOverwriteDialog(this.app, collisions.size, resolve).open()
+      );
+      if (choice === 'cancel') return;
+      if (choice === 'skip') {
+        targets = files.filter((f) => !collisions.has(f));
+        skipped = collisions.size;
+      } else {
+        overwriteExisting = true;
+      }
+    }
+
+    if (targets.length === 0) {
+      new Notice('변환할 파일이 없습니다 (모두 건너뜀)');
+      return;
+    }
+
+    const isBatch = targets.length > 1;
+    let succeeded = 0;
+    let failed = 0;
+    for (const [index, file] of targets.entries()) {
+      if (isBatch) {
+        new Notice(`(${index + 1}/${targets.length}) ${file.name} 변환 중…`);
+      }
+      const ok = await this.convertFile(file, {
+        overwriteExisting,
+        openAfterConversion: !isBatch,
+      });
+      if (ok) succeeded++;
+      else failed++;
+    }
+    if (isBatch || skipped > 0) {
+      new Notice(
+        `일괄 변환 완료: 성공 ${succeeded}개` +
+          (failed > 0 ? `, 실패 ${failed}개` : '') +
+          (skipped > 0 ? `, 건너뜀 ${skipped}개` : '')
+      );
+    }
+  }
+
   private isValidFile(file: TFile): boolean {
-    const allowedExtensions =
-      this.settings.apiEndpoint === 'datalab'
-        ? ['pdf', 'docx', 'pptx', 'ppt', 'doc']
-        : ['pdf'];
-    return allowedExtensions.includes(file.extension);
+    // Mistral OCR 네이티브 지원 포맷: pdf, 오피스 문서(docx/pptx 등), 이미지
+    const allowedExtensions = [
+      'pdf',
+      'docx',
+      'doc',
+      'pptx',
+      'ppt',
+      'png',
+      'jpg',
+      'jpeg',
+    ];
+    return allowedExtensions.includes(file.extension.toLowerCase());
   }
 
   private getMenuItemTitle(file: TFile): string {
@@ -90,16 +193,35 @@ export default class Marker extends Plugin {
       pptx: 'PPTX를 MD로 변환',
       ppt: 'PPT를 MD로 변환',
       doc: 'DOC를 MD로 변환',
+      png: '이미지를 MD로 변환 (OCR)',
+      jpg: '이미지를 MD로 변환 (OCR)',
+      jpeg: '이미지를 MD로 변환 (OCR)',
     };
-    return titles[file.extension as keyof typeof titles] || 'MD로 변환';
+    return (
+      titles[file.extension.toLowerCase() as keyof typeof titles] ||
+      'MD로 변환'
+    );
   }
 
-  private async convertFile(file: TFile) {
+  private async convertFile(
+    file: TFile,
+    options?: ConvertOptions
+  ): Promise<boolean> {
     if (this.converter) {
-      await this.converter.convert(this.app, this.settings, file);
-    } else {
-      console.error('No converter initialized.');
+      try {
+        return await this.converter.convert(
+          this.app,
+          this.settings,
+          file,
+          options
+        );
+      } catch (error) {
+        console.error(`Conversion failed for ${file.path}:`, error);
+        return false;
+      }
     }
+    console.error('No converter initialized.');
+    return false;
   }
 
   private addCommands() {

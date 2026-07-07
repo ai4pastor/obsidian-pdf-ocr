@@ -131,9 +131,11 @@ export async function createMarkdownFile(
   settings: MarkerSettings,
   markdown: string,
   folderPath: string,
-  originalFile: TFile
+  originalFile: TFile,
+  openAfterConversion = true
 ) {
-  const fileName = originalFile.name.split('.')[0] + '.md';
+  // basename 사용 — 파일명에 점이 있어도(예: "2026.07.07 설교.pdf") 이름이 잘리지 않음
+  const fileName = originalFile.basename + '.md';
   const filePath = folderPath + fileName;
   let file: TFile;
 
@@ -163,7 +165,10 @@ export async function createMarkdownFile(
     file = await app.vault.create(filePath, markdown);
   }
   new Notice(`마크다운 파일 생성: ${fileName}`);
-  app.workspace.openLinkText(file.path, '', true);
+  // 일괄 변환 시에는 파일마다 새 탭을 열지 않음
+  if (openAfterConversion) {
+    app.workspace.openLinkText(file.path, '', true);
+  }
 }
 
 export async function addMetadataToMarkdownFile(
@@ -172,7 +177,7 @@ export async function addMetadataToMarkdownFile(
   folderPath: string,
   originalFile: TFile
 ) {
-  const fileName = originalFile.name.split('.')[0] + '.md';
+  const fileName = originalFile.basename + '.md';
   const filePath = folderPath + fileName;
   const file = app.vault.getAbstractFileByPath(filePath);
   if (file instanceof TFile) {
@@ -213,7 +218,7 @@ function generateFrontmatter(metadata: { [key: string]: any }): string {
 export async function deleteOriginalFile(app: App, file: TFile) {
   try {
     await app.fileManager.trashFile(file);
-    new Notice('원본 PDF 파일 삭제 완료');
+    new Notice('원본 파일 삭제 완료');
   } catch (error) {
     console.error('Error deleting original file:', error);
   }
