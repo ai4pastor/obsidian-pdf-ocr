@@ -5,6 +5,7 @@ import {
   MarkerBatchOverwriteDialog,
   BatchOverwriteChoice,
 } from './modals';
+import { convertBibleReferences } from './utils/bibleLinks';
 import { Converter, ConvertOptions } from './converter';
 import { DatalabConverter } from './converters/datalabConverter';
 import { MarkerApiDockerConverter } from './converters/markerApiDocker';
@@ -15,12 +16,49 @@ export default class Marker extends Plugin {
   settings: MarkerSettings;
   converter: Converter;
 
+  // 플러그인이 변환 중 생성하는 파일(추출 이미지 등)을 감시 폴더가 다시 변환하지 않도록 추적
+  private activeConversions = 0;
+
   async onload() {
     await this.loadSettings();
     this.setConverter(); // Instantiate converter based on settings
     this.addCommands();
     this.addSettingTab(new MarkerSettingTab(this.app, this));
     this.registerFileMenuEvents();
+    this.registerWatchFolder();
+  }
+
+  private registerWatchFolder() {
+    // onLayoutReady 이후 등록 — 볼트 초기 로딩 시 모든 파일에 대해 create가 발생하기 때문
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(
+        this.app.vault.on('create', (file: TAbstractFile) => {
+          this.handleWatchedFileCreate(file);
+        })
+      );
+    });
+  }
+
+  private handleWatchedFileCreate(file: TAbstractFile) {
+    const watchFolder = (this.settings.watchFolder || '')
+      .trim()
+      .replace(/^\/+|\/+$/g, '');
+    if (!watchFolder) return;
+    if (!(file instanceof TFile) || !this.isValidFile(file)) return;
+    // 변환 작업이 만든 파일(추출 이미지 등)은 무시 — 무한 루프·중복 과금 방지
+    if (this.activeConversions > 0) return;
+    // 감시 폴더 직속 파일만 대상
+    if (file.parent?.path !== watchFolder) return;
+
+    // 외부 복사/동기화가 끝나기 전에 업로드하지 않도록 잠시 대기
+    new Notice(`감시 폴더: ${file.name} 자동 변환을 시작합니다`);
+    setTimeout(() => {
+      // 대기 중 삭제·이동됐을 수 있으므로 다시 확인
+      const current = this.app.vault.getAbstractFileByPath(file.path);
+      if (current instanceof TFile) {
+        this.convertFiles([current]);
+      }
+    }, 1500);
   }
 
   private setConverter() {
@@ -208,6 +246,7 @@ export default class Marker extends Plugin {
     options?: ConvertOptions
   ): Promise<boolean> {
     if (this.converter) {
+      this.activeConversions++;
       try {
         return await this.converter.convert(
           this.app,
@@ -218,6 +257,8 @@ export default class Marker extends Plugin {
       } catch (error) {
         console.error(`Conversion failed for ${file.path}:`, error);
         return false;
+      } finally {
+        this.activeConversions--;
       }
     }
     console.error('No converter initialized.');
@@ -235,6 +276,25 @@ export default class Marker extends Plugin {
         if (checking) return true;
 
         this.convertFile(activeFile);
+      },
+    });
+
+    // 이미 존재하는 노트에도 성경 구절 wikilink 변환을 적용할 수 있는 명령
+    this.addCommand({
+      id: 'convert-bible-links-in-note',
+      name: '현재 노트의 성경 구절을 wikilink로 변환',
+      editorCallback: (editor) => {
+        const before = editor.getValue();
+        const after = convertBibleReferences(before);
+        if (before === after) {
+          new Notice('변환할 성경 구절이 없습니다');
+          return;
+        }
+        const added =
+          (after.match(/\[\[/g)?.length ?? 0) -
+          (before.match(/\[\[/g)?.length ?? 0);
+        editor.setValue(after);
+        new Notice(`성경 구절 wikilink ${added}개 변환 완료`);
       },
     });
   }

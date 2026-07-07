@@ -1,6 +1,46 @@
-import { App, PluginSettingTab, Setting, TFile } from 'obsidian';
+import {
+  AbstractInputSuggest,
+  App,
+  PluginSettingTab,
+  Setting,
+  TFile,
+  TFolder,
+} from 'obsidian';
 import Marker from './main';
 import { renderConverterSettings } from './utils/converterSettingsUtils';
+
+// 텍스트 입력란에 볼트 폴더 경로 자동완성을 붙이는 서제스트
+class FolderSuggest extends AbstractInputSuggest<TFolder> {
+  private textInputEl: HTMLInputElement;
+
+  constructor(app: App, inputEl: HTMLInputElement) {
+    super(app, inputEl);
+    this.textInputEl = inputEl;
+  }
+
+  getSuggestions(query: string): TFolder[] {
+    const lowerQuery = query.toLowerCase();
+    return this.app.vault
+      .getAllLoadedFiles()
+      .filter(
+        (f): f is TFolder =>
+          f instanceof TFolder && f.path !== '/' // 볼트 루트는 감시 대상에서 제외
+      )
+      .filter((f) => f.path.toLowerCase().includes(lowerQuery))
+      .sort((a, b) => a.path.localeCompare(b.path))
+      .slice(0, 50);
+  }
+
+  renderSuggestion(folder: TFolder, el: HTMLElement) {
+    el.setText(folder.path);
+  }
+
+  selectSuggestion(folder: TFolder) {
+    this.textInputEl.value = folder.path;
+    this.textInputEl.trigger('input'); // onChange 발화 → 설정 저장
+    this.close();
+  }
+}
 
 // Templater 플러그인이 설정한 템플릿 폴더 경로 반환 (없으면 null)
 function getTemplaterFolder(app: App): string | null {
@@ -49,6 +89,8 @@ export interface MarkerSettings {
   templaterTemplate?: string;
   // 본문에서 성경 구절을 [[책장_절]] 위키링크로 자동 변환
   bibleLinkConvert?: boolean;
+  // 감시 폴더 — 이 폴더에 새 파일이 들어오면 자동 변환 (빈 값이면 사용 안 함)
+  watchFolder?: string;
 }
 
 export const DEFAULT_SETTINGS: MarkerSettings = {
@@ -77,6 +119,7 @@ export const DEFAULT_SETTINGS: MarkerSettings = {
   deleteFileFromMistralaiAfterConversion: false,
   templaterTemplate: '',
   bibleLinkConvert: true,
+  watchFolder: '',
 };
 
 export class MarkerSettingTab extends PluginSettingTab {
@@ -284,6 +327,26 @@ export class MarkerSettingTab extends PluginSettingTab {
             });
         });
     }
+
+    // ── 감시 폴더 자동 변환 ──
+    containerEl.createEl('h3', { text: '감시 폴더 자동 변환' });
+
+    new Setting(containerEl)
+      .setName('감시 폴더')
+      .setDesc(
+        '이 폴더에 새 파일(PDF·DOCX·이미지 등)이 들어오면 자동으로 MD 변환과 템플릿 적용까지 실행합니다. 파일을 넣는 즉시 API 사용량이 발생하니 주의하세요. 비워두면 사용하지 않습니다.'
+      )
+      .addText((text) => {
+        text
+          .setPlaceholder('예: inbox/ocr')
+          .setValue(this.plugin.settings.watchFolder || '')
+          .onChange(async (value) => {
+            this.plugin.settings.watchFolder = value.trim();
+            await this.plugin.saveSettings();
+          });
+        // 폴더 경로 자동완성 — 클릭/입력 시 볼트 폴더 목록 제안
+        new FolderSuggest(this.app, text.inputEl);
+      });
 
     // Initialize settings state
     updateMovePDFSetting(this.plugin.settings.createFolder);

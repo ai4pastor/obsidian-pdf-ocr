@@ -48,6 +48,43 @@ async function applyTemplaterTemplate(
   }
 }
 
+// Mistral OCR 업로드 제한 (공식 문서: 50MB / 1,000페이지)
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
+// Mistral API 오류를 사용자용 한국어 메시지로 변환
+function translateMistralError(error: any): string {
+  const rawMessage: string = error?.message || '';
+  const status: number | undefined =
+    error?.statusCode ??
+    error?.status ??
+    (rawMessage.match(/Status (\d{3})/)
+      ? parseInt(rawMessage.match(/Status (\d{3})/)![1])
+      : undefined);
+
+  switch (status) {
+    case 401:
+      return 'API 키가 올바르지 않습니다. 설정에서 MistralAI API 키를 확인해주세요.';
+    case 402:
+      return 'MistralAI 크레딧이 부족합니다. console.mistral.ai에서 결제 상태를 확인해주세요.';
+    case 403:
+      return 'API 접근이 거부되었습니다. 키 권한을 확인해주세요.';
+    case 413:
+      return '파일이 너무 큽니다 (최대 50MB).';
+    case 422:
+      return '파일 형식을 처리할 수 없습니다. 파일이 손상되지 않았는지 확인해주세요.';
+    case 429:
+      return '요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.';
+    case 500:
+    case 502:
+    case 503:
+      return 'MistralAI 서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해주세요.';
+  }
+  if (/fetch|network|ENOTFOUND|ECONN|timeout/i.test(rawMessage)) {
+    return '네트워크 연결을 확인해주세요.';
+  }
+  return rawMessage || '네트워크 또는 서버 오류';
+}
+
 export class MistralAIConverter extends BaseConverter {
   async convert(
     app: App,
@@ -68,6 +105,15 @@ export class MistralAIConverter extends BaseConverter {
     if (!settings.mistralaiApiKey) {
       new Notice('오류: MistralAI API 키가 설정되지 않았습니다');
       console.error('Missing MistralAI API key in settings');
+      return false;
+    }
+
+    // 업로드 전에 크기 제한 확인 — API 오류보다 먼저 한국어로 안내
+    if (file.stat.size > MAX_FILE_SIZE_BYTES) {
+      const sizeMB = (file.stat.size / 1024 / 1024).toFixed(1);
+      new Notice(
+        `변환 실패: ${file.name} — 파일이 50MB 제한을 초과합니다 (현재 ${sizeMB}MB)`
+      );
       return false;
     }
 
@@ -176,11 +222,7 @@ export class MistralAIConverter extends BaseConverter {
       return true;
     } catch (error) {
       console.error('MistralAI conversion error:', error.message, error.stack);
-      new Notice(
-        `MistralAI 변환 실패: ${
-          error.message || '네트워크 또는 서버 오류'
-        }`
-      );
+      new Notice(`MistralAI 변환 실패: ${translateMistralError(error)}`);
       return false;
     } finally {
       if (
@@ -302,7 +344,7 @@ export class MistralAIConverter extends BaseConverter {
       return false;
     } catch (error) {
       if (!silent) {
-        new Notice(`MistralAI API 연결 오류: ${error.message}`);
+        new Notice(`MistralAI API 연결 오류: ${translateMistralError(error)}`);
       }
       console.error('Error connecting to MistralAI API:', error);
       return false;
