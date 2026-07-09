@@ -16,3 +16,6 @@ build/
 
 # Obsidian test vault
 test-vault/.obsidian/workspace*
+
+# 내부 개발 문서 (공개 배포 제외)
+CLAUDE.md
