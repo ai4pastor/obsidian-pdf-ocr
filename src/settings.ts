@@ -1,6 +1,8 @@
 import {
   AbstractInputSuggest,
   App,
+  Notice,
+  Platform,
   PluginSettingTab,
   Setting,
   TFile,
@@ -8,6 +10,7 @@ import {
 } from 'obsidian';
 import Marker from './main';
 import { renderConverterSettings } from './utils/converterSettingsUtils';
+import { checkLocalOcr } from './local/localConverter';
 
 // 텍스트 입력란에 볼트 폴더 경로 자동완성을 붙이는 서제스트
 class FolderSuggest extends AbstractInputSuggest<TFolder> {
@@ -16,6 +19,10 @@ class FolderSuggest extends AbstractInputSuggest<TFolder> {
   constructor(app: App, inputEl: HTMLInputElement) {
     super(app, inputEl);
     this.textInputEl = inputEl;
+    // AbstractInputSuggest 는 타이핑할 때만 목록을 띄운다 — 빈 칸을 클릭만 해도 전체 폴더가 보이도록 input 을 한 번 흘린다
+    inputEl.addEventListener('focus', () => {
+      inputEl.dispatchEvent(new Event('input'));
+    });
   }
 
   getSuggestions(query: string): TFolder[] {
@@ -91,6 +98,12 @@ export interface MarkerSettings {
   bibleLinkConvert?: boolean;
   // 감시 폴더 — 이 폴더에 새 파일이 들어오면 자동 변환 (빈 값이면 사용 안 함)
   watchFolder?: string;
+  // 변환 엔진 — local: 컴퓨터 안에서 변환(kordoc, 무료·오프라인) / mistral: Mistral OCR API(유료)
+  conversionEngine?: 'local' | 'mistral';
+  // 로컬 엔진: 스캔본 쪽·그림 파일을 컴퓨터 내장 OCR(맥 Apple Vision·윈도우 OCR)로 읽기
+  ocrEnabled?: boolean;
+  // 로컬 엔진: PDF 쪽마다 반복되는 머리글·바닥글(쪽 번호 등) 지우기
+  removeHeaderFooter?: boolean;
 }
 
 export const DEFAULT_SETTINGS: MarkerSettings = {
@@ -120,6 +133,9 @@ export const DEFAULT_SETTINGS: MarkerSettings = {
   templaterTemplate: '',
   bibleLinkConvert: true,
   watchFolder: '',
+  conversionEngine: 'local',
+  ocrEnabled: true,
+  removeHeaderFooter: false,
 };
 
 export class MarkerSettingTab extends PluginSettingTab {
@@ -133,19 +149,114 @@ export class MarkerSettingTab extends PluginSettingTab {
 
     containerEl.empty();
 
-    // Mistral 고정 (다른 엔드포인트는 비활성화)
-    if (this.plugin.settings.apiEndpoint !== 'mistralai') {
-      this.plugin.settings.apiEndpoint = 'mistralai';
-      this.plugin.saveSettings();
+    const engine = this.plugin.settings.conversionEngine ?? 'local';
+
+    // ── 변환 엔진 ──
+    containerEl.createEl('h3', { text: '변환 엔진' });
+
+    new Setting(containerEl)
+      .setName('변환 엔진')
+      .setDesc(
+        '로컬: HWP·HWPX·PDF·DOCX·PPTX·XLSX를 이 컴퓨터 안에서 변환합니다. 무료이고 인터넷·API 키가 필요 없습니다. ' +
+          'Mistral: 유료 API로 변환합니다(스캔본 품질이 가장 좋음, API 키 필요).'
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption('local', '로컬 (무료·오프라인, 추천)')
+          .addOption('mistral', 'Mistral API (유료)')
+          .setValue(engine)
+          .onChange(async (value) => {
+            this.plugin.settings.conversionEngine = value === 'mistral' ? 'mistral' : 'local';
+            await this.plugin.saveSettings();
+            this.display(); // 엔진별 설정 다시 그리기
+          })
+      );
+
+    if (engine === 'local') {
+      this.renderLocalEngineSettings(containerEl);
+    } else {
+      this.renderMistralSettings(containerEl);
     }
 
+    this.renderGeneralSettings(containerEl);
+  }
+
+  // ── 로컬 엔진 설정 ──
+  private renderLocalEngineSettings(containerEl: HTMLElement): void {
+    if (!Platform.isDesktopApp) {
+      containerEl.createEl('p', {
+        text: '이 기기(휴대폰·태블릿)에서는 로컬 변환을 쓸 수 없습니다. PC에서 변환하거나 Mistral 엔진을 고르세요.',
+        attr: { style: 'color: var(--text-error); font-size: 0.9em;' },
+      });
+    }
+
+    const ocrLabel = Platform.isMacOS
+      ? 'Apple Vision(맥 내장)'
+      : Platform.isWin
+      ? '윈도우 내장 OCR(베타)'
+      : '내장 OCR 없음';
+
+    new Setting(containerEl)
+      .setName('스캔본·사진 글자 인식(OCR)')
+      .setDesc(
+        `글자층이 없는 PDF 쪽(스캔본)과 그림 파일(png·jpg)을 이 컴퓨터의 내장 OCR로 읽습니다. 이 컴퓨터: ${ocrLabel}. ` +
+          '설치할 것은 없습니다. 윈도우는 한국어 "광학 문자 인식" 언어 기능이 있어야 합니다.'
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.ocrEnabled ?? true).onChange(async (value) => {
+          this.plugin.settings.ocrEnabled = value;
+          await this.plugin.saveSettings();
+        })
+      )
+      .addButton((btn) =>
+        btn.setButtonText('OCR 점검').onClick(async () => {
+          if (!Platform.isDesktopApp) {
+            new Notice('이 기기에서는 내장 OCR을 쓸 수 없습니다');
+            return;
+          }
+          btn.setDisabled(true);
+          btn.setButtonText('점검 중…');
+          try {
+            const support = await checkLocalOcr();
+            new Notice(support.message, 10000);
+          } catch (error) {
+            new Notice(`OCR 점검 실패: ${error instanceof Error ? error.message : String(error)}`, 10000);
+          } finally {
+            btn.setDisabled(false);
+            btn.setButtonText('OCR 점검');
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('PDF 머리글·바닥글 지우기')
+      .setDesc('PDF 쪽마다 반복되는 머리글·바닥글(쪽 번호, 문서 제목 등)을 빼고 본문만 남깁니다.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.removeHeaderFooter ?? false).onChange(async (value) => {
+          this.plugin.settings.removeHeaderFooter = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    containerEl.createEl('p', {
+      text: '옛 형식(.doc·.ppt)은 로컬로 변환할 수 없습니다 — 워드·파워포인트에서 .docx·.pptx로 다시 저장해 주세요.',
+      attr: { style: 'color: var(--text-muted); font-size: 0.9em;' },
+    });
+  }
+
+  // ── Mistral 설정 ──
+  private renderMistralSettings(containerEl: HTMLElement): void {
     containerEl.createEl('h3', { text: 'MistralAI 설정' });
+    containerEl.createEl('p', {
+      text: 'HWP·HWPX·엑셀 파일은 Mistral이 지원하지 않아 항상 로컬로 변환합니다.',
+      attr: { style: 'color: var(--text-muted); font-size: 0.9em;' },
+    });
 
     // MistralAI API 키 입력 + 두 개 버튼 (연결 테스트 + 키 발급 링크)
     new Setting(containerEl)
       .setName('MistralAI API 키')
       .setDesc(
-        'MistralAI API 키를 입력하세요. 무료 발급 가능합니다.'
+        'MistralAI API 키를 입력하세요. 유료 API입니다(console.mistral.ai에서 결제·발급).'
       )
       .addText((text) =>
         text
@@ -173,16 +284,19 @@ export class MarkerSettingTab extends PluginSettingTab {
       );
 
     // Render the rest of converter settings (API 키는 위에서 직접 처리했으므로 중복 표시 회피)
-    if (this.plugin.converter) {
-      renderConverterSettings(
-        containerEl,
-        this.app,
-        this.plugin.converter,
-        this.plugin.settings,
-        async () => await this.plugin.saveSettings(),
-        ['mistralaiApiKey']
-      );
-    }
+    renderConverterSettings(
+      containerEl,
+      this.app,
+      this.plugin.mistralConverter,
+      this.plugin.settings,
+      async () => await this.plugin.saveSettings(),
+      ['mistralaiApiKey']
+    );
+  }
+
+  // ── 일반 설정 · 템플릿 · 감시 폴더 (모든 엔진 공통) ──
+  private renderGeneralSettings(containerEl: HTMLElement): void {
+    const usesMistral = this.plugin.settings.conversionEngine === 'mistral';
 
     // Add a heading for general settings
     containerEl.createEl('h3', { text: '일반 설정' });
@@ -314,7 +428,7 @@ export class MarkerSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName('변환 후 적용할 템플릿')
         .setDesc(
-          `OCR 변환이 끝난 MD 파일에 자동 적용할 Templater 템플릿. (폴더: ${templaterFolder})`
+          `변환이 끝난 MD 파일에 자동 적용할 Templater 템플릿. (폴더: ${templaterFolder})`
         )
         .addDropdown((dropdown) => {
           dropdown.addOption('', '사용 안 함');
@@ -334,7 +448,11 @@ export class MarkerSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('감시 폴더')
       .setDesc(
-        '이 폴더에 새 파일(PDF·DOCX·이미지 등)이 들어오면 자동으로 MD 변환과 템플릿 적용까지 실행합니다. 파일을 넣는 즉시 API 사용량이 발생하니 주의하세요. 비워두면 사용하지 않습니다.'
+        '이 폴더 바로 안에 새 파일(HWP·PDF·DOCX·이미지 등)이 들어오면 자동으로 MD 변환과 템플릿 적용까지 실행합니다. ' +
+          (usesMistral
+            ? 'Mistral 엔진은 파일을 넣는 즉시 API 요금이 발생하니 주의하세요. '
+            : '') +
+          '비워두면 사용하지 않습니다.'
       )
       .addText((text) => {
         text
@@ -346,7 +464,31 @@ export class MarkerSettingTab extends PluginSettingTab {
           });
         // 폴더 경로 자동완성 — 클릭/입력 시 볼트 폴더 목록 제안
         new FolderSuggest(this.app, text.inputEl);
-      });
+      })
+      .addButton((btn) =>
+        btn.setButtonText('검증').onClick(() => {
+          const folderPath = (this.plugin.settings.watchFolder || '')
+            .trim()
+            .replace(/^\/+|\/+$/g, '');
+          if (!folderPath) {
+            new Notice('감시 폴더가 비어 있습니다 (사용 안 함)');
+            return;
+          }
+          const folder = this.app.vault.getAbstractFileByPath(folderPath);
+          if (!(folder instanceof TFolder)) {
+            new Notice(`폴더를 찾을 수 없습니다: ${folderPath}`);
+            return;
+          }
+          const convertible = folder.children.filter(
+            (child): child is TFile => child instanceof TFile && this.plugin.isConvertible(child)
+          ).length;
+          new Notice(
+            `✓ 폴더 확인: ${folderPath} — 지금 들어 있는 변환 가능 파일 ${convertible}개 ` +
+              '(이미 있던 파일은 자동 변환하지 않고, 새로 들어오는 파일만 변환합니다)',
+            8000
+          );
+        })
+      );
 
     // Initialize settings state
     updateMovePDFSetting(this.plugin.settings.createFolder);

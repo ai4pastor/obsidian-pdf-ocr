@@ -4,7 +4,8 @@ import { ConverterSettingDefinition } from './utils/converterSettingsUtils';
 
 export interface ConversionResult {
   markdown?: string;
-  images?: { [key: string]: string };
+  // 파일명 → base64 문자열(Mistral) 또는 바이트(로컬 엔진)
+  images?: { [key: string]: string | Uint8Array };
   metadata?: { [key: string]: any };
   success: boolean;
   error?: string;

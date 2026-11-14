@@ -7,21 +7,36 @@ import {
 } from './modals';
 import { convertBibleReferences } from './utils/bibleLinks';
 import { Converter, ConvertOptions } from './converter';
-import { DatalabConverter } from './converters/datalabConverter';
-import { MarkerApiDockerConverter } from './converters/markerApiDocker';
-import { PythonAPIConverter } from './converters/markerPythonApi';
 import { MistralAIConverter } from './converters/mistralaiConverter';
+import {
+  LEGACY_OFFICE_EXTENSIONS,
+  LOCAL_DOCUMENT_EXTENSIONS,
+  LOCAL_IMAGE_EXTENSIONS,
+  LocalConverter,
+} from './local/localConverter';
+
+// Mistral OCR 이 받는 형식 (이 밖의 형식은 Mistral 엔진을 골라도 로컬로 변환)
+const MISTRAL_EXTENSIONS = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'png', 'jpg', 'jpeg'];
+// 메뉴·감시 폴더가 받는 전체 형식
+const CONVERTIBLE_EXTENSIONS = [
+  ...new Set([
+    ...LOCAL_DOCUMENT_EXTENSIONS,
+    ...LOCAL_IMAGE_EXTENSIONS,
+    ...LEGACY_OFFICE_EXTENSIONS,
+  ]),
+];
 
 export default class Marker extends Plugin {
   settings: MarkerSettings;
-  converter: Converter;
+  // 변환기 두 가지 — 파일 형식과 설정(conversionEngine)에 따라 고른다
+  localConverter: LocalConverter = new LocalConverter();
+  mistralConverter: MistralAIConverter = new MistralAIConverter();
 
   // 플러그인이 변환 중 생성하는 파일(추출 이미지 등)을 감시 폴더가 다시 변환하지 않도록 추적
   private activeConversions = 0;
 
   async onload() {
     await this.loadSettings();
-    this.setConverter(); // Instantiate converter based on settings
     this.addCommands();
     this.addSettingTab(new MarkerSettingTab(this.app, this));
     this.registerFileMenuEvents();
@@ -59,27 +74,6 @@ export default class Marker extends Plugin {
         this.convertFiles([current]);
       }
     }, 1500);
-  }
-
-  private setConverter() {
-    switch (this.settings.apiEndpoint) {
-      case 'datalab':
-        this.converter = new DatalabConverter();
-        break;
-      case 'selfhosted':
-        this.converter = new MarkerApiDockerConverter();
-        break;
-      case 'python-api':
-        this.converter = new PythonAPIConverter();
-        break;
-      case 'mistralai':
-        this.converter = new MistralAIConverter();
-        break;
-      default:
-        console.error('Invalid API endpoint setting.');
-        // Default to selfhosted if invalid setting
-        this.converter = new MarkerApiDockerConverter();
-    }
   }
 
   private registerFileMenuEvents() {
@@ -134,10 +128,13 @@ export default class Marker extends Plugin {
       item.setTitle(`폴더 내 ${targetFiles.length}개 파일을 MD로 변환`);
       item.setSection('action');
       item.onClick(() => {
+        const usesMistral = this.settings.conversionEngine === 'mistral';
         new MarkerOkayCancelDialog(
           this.app,
           '폴더 일괄 변환',
-          `${targetFiles.length}개 파일을 MD로 변환합니다. Mistral API 사용량이 발생합니다. 계속할까요?`,
+          usesMistral
+            ? `${targetFiles.length}개 파일을 MD로 변환합니다. Mistral API 요금이 발생할 수 있습니다. 계속할까요?`
+            : `${targetFiles.length}개 파일을 이 컴퓨터에서 MD로 변환합니다(무료). 계속할까요?`,
           async (confirmed) => {
             if (confirmed) await this.convertFiles(targetFiles);
           }
@@ -210,25 +207,34 @@ export default class Marker extends Plugin {
   }
 
   private isValidFile(file: TFile): boolean {
-    // Mistral OCR 네이티브 지원 포맷: pdf, 오피스 문서(docx/pptx 등), 이미지
-    const allowedExtensions = [
-      'pdf',
-      'docx',
-      'doc',
-      'pptx',
-      'ppt',
-      'png',
-      'jpg',
-      'jpeg',
-    ];
-    return allowedExtensions.includes(file.extension.toLowerCase());
+    // 확장자 게이트는 여기 한 곳 — 로컬(kordoc) 형식 + 이미지 + 옛 오피스(Mistral 전용·로컬은 안내)
+    return CONVERTIBLE_EXTENSIONS.includes(file.extension.toLowerCase());
+  }
+
+  /** 설정 화면(감시 폴더 검증)에서 쓰는 공개 확인 함수 */
+  public isConvertible(file: TFile): boolean {
+    return this.isValidFile(file);
+  }
+
+  /** 파일마다 쓸 변환기 — Mistral 엔진을 골랐어도 Mistral 이 못 읽는 형식(HWP 등)은 로컬로 */
+  private getConverterFor(file: TFile): Converter {
+    const ext = file.extension.toLowerCase();
+    if (this.settings.conversionEngine === 'mistral' && MISTRAL_EXTENSIONS.includes(ext)) {
+      return this.mistralConverter;
+    }
+    return this.localConverter;
   }
 
   private getMenuItemTitle(file: TFile): string {
     const titles = {
       pdf: 'PDF를 MD로 변환',
+      hwp: '한글(HWP)을 MD로 변환',
+      hwpx: '한글(HWPX)을 MD로 변환',
+      hml: '한글(HML)을 MD로 변환',
       docx: 'DOCX를 MD로 변환',
       pptx: 'PPTX를 MD로 변환',
+      xlsx: '엑셀(XLSX)을 MD로 변환',
+      xls: '엑셀(XLS)을 MD로 변환',
       ppt: 'PPT를 MD로 변환',
       doc: 'DOC를 MD로 변환',
       png: '이미지를 MD로 변환 (OCR)',
@@ -245,24 +251,16 @@ export default class Marker extends Plugin {
     file: TFile,
     options?: ConvertOptions
   ): Promise<boolean> {
-    if (this.converter) {
-      this.activeConversions++;
-      try {
-        return await this.converter.convert(
-          this.app,
-          this.settings,
-          file,
-          options
-        );
-      } catch (error) {
-        console.error(`Conversion failed for ${file.path}:`, error);
-        return false;
-      } finally {
-        this.activeConversions--;
-      }
+    const converter = this.getConverterFor(file);
+    this.activeConversions++;
+    try {
+      return await converter.convert(this.app, this.settings, file, options);
+    } catch (error) {
+      console.error(`Conversion failed for ${file.path}:`, error);
+      return false;
+    } finally {
+      this.activeConversions--;
     }
-    console.error('No converter initialized.');
-    return false;
   }
 
   private addCommands() {
@@ -307,15 +305,10 @@ export default class Marker extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
-    this.setConverter();
   }
 
+  /** 설정 화면의 Mistral "연결 테스트" 단추 */
   public async testConnection(silent: boolean | undefined): Promise<boolean> {
-    if (this.converter) {
-      return this.converter.testConnection(this.settings, silent);
-    } else {
-      console.error('No converter initialized.');
-      return false;
-    }
+    return this.mistralConverter.testConnection(this.settings, silent);
   }
 }

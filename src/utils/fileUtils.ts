@@ -72,21 +72,29 @@ export async function checkForExistingFiles(
   return true;
 }
 
+// 이미지 데이터(base64 문자열 또는 바이트)를 정확한 길이의 ArrayBuffer 로
+function toImageArrayBuffer(data: string | Uint8Array): ArrayBuffer {
+  if (typeof data === 'string') return base64ToArrayBuffer(data);
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return copy.buffer;
+}
+
 export async function createImageFiles(
   app: App,
   settings: MarkerSettings,
-  images: { [key: string]: string },
+  images: { [key: string]: string | Uint8Array },
   folderPath: string,
   originalFile: TFile
 ) {
   const totalImages = Object.keys(images).length;
   let processedImages = 0;
 
-  for (const [imageName, imageBase64] of Object.entries(images)) {
+  for (const [imageName, imageData] of Object.entries(images)) {
     try {
       // PDF 이름 폴더 안에 들어가므로 파일명에 PDF prefix 불필요
       const newImageName = imageName;
-      const imageArrayBuffer = base64ToArrayBuffer(imageBase64);
+      const imageArrayBuffer = toImageArrayBuffer(imageData);
       // check if image already exists, if so, overwrite it
       if (
         app.vault.getAbstractFileByPath(folderPath + newImageName) instanceof
@@ -139,17 +147,25 @@ export async function createMarkdownFile(
   const filePath = folderPath + fileName;
   let file: TFile;
 
-  // 이미지 하위 폴더 사용 시: 마크다운 이미지 링크를 "PDF이름/이미지파일명" 형식으로 교체
+  // 이미지 하위 폴더 사용 시: 마크다운 이미지 링크를 "원본이름/이미지파일명" 형식으로 교체
+  // (한 줄에 그림이 여럿이어도 각각 바꾸고, 웹 주소·data URI·이미 경로가 붙은 링크는 그대로 둔다)
   if (settings.createAssetSubfolder) {
-    const folderName = originalFile.basename.replace(/\s+/g, '%20');
+    // 공백·괄호는 마크다운 링크를 끊으므로 퍼센트 인코딩 (한글은 그대로 둬 읽기 쉽게)
+    const folderName = originalFile.basename
+      .replace(/\s+/g, '%20')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29');
     markdown = markdown.replace(
-      /!\[.*\]\((.*)\)/g,
-      `![$1](${folderName}/$1)`
+      /!\[[^\]\n]*\]\(([^)\s]+)\)/g,
+      (match: string, target: string) =>
+        /^(https?:|data:|app:|file:)/i.test(target) || target.includes('/')
+          ? match
+          : `![${target}](${folderName}/${target})`
     );
   }
   // remove images when only text is extracted
   if (settings.extractContent === 'text') {
-    markdown = markdown.replace(/!\[.*\]\(.*\)/g, '');
+    markdown = markdown.replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, '');
   }
 
   // 성경 구절 자동 wikilink 변환

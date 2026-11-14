@@ -19,3 +19,7 @@ test-vault/.obsidian/workspace*
 
 # 내부 개발 문서 (공개 배포 제외)
 CLAUDE.md
+
+# 빌드 산출물 (자동 생성)
+src/generated/
+meta.json

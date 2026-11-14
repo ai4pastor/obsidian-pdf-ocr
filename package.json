@@ -1,27 +1,30 @@
 {
 	"name": "obsidian-pdf-ocr",
-	"version": "0.6.0",
-	"description": "Mistral OCR로 PDF를 마크다운으로 변환 (obsidian-marker 기반)",
+	"version": "0.7.0",
+	"description": "HWP·PDF·DOCX·PPTX 등을 컴퓨터 안에서(무료·오프라인) 마크다운으로 변환 — kordoc 엔진 + 내장 OCR, 선택 시 Mistral OCR",
 	"main": "main.js",
 	"scripts": {
-		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"gen-assets": "node scripts/gen-cmaps.mjs",
+		"dev": "npm run gen-assets && node esbuild.config.mjs",
+		"build": "npm run gen-assets && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs"
 	},
 	"keywords": [],
 	"author": "abadcsh",
 	"license": "MIT",
 	"devDependencies": {
-		"@types/node": "^16.11.6",
+		"@types/node": "22.19.1",
 		"@typescript-eslint/eslint-plugin": "5.29.0",
 		"@typescript-eslint/parser": "5.29.0",
 		"builtin-modules": "3.3.0",
-		"esbuild": "0.17.3",
+		"esbuild": "0.28.2",
 		"obsidian": "latest",
 		"tslib": "2.4.0",
-		"typescript": "4.7.4"
+		"typescript": "5.9.3"
 	},
 	"dependencies": {
-		"@mistralai/mistralai": "^1.5.2"
+		"@mistralai/mistralai": "^1.5.2",
+		"kordoc": "4.24.70",
+		"pdfjs-dist": "4.10.38"
 	}
 }
